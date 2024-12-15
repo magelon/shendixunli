@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>自定义地图 - OpenStreetMap</title>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+    <style>
+        #map {
+            height: 600px;
+            width: 100%;
+        }
+        .control-panel {
+            padding: 10px;
+            background: #fff;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .marker-info img {
+            max-width: 200px;
+            margin-top: 10px;
+        }
+        .location-list {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="control-panel">
+        <!-- 搜索框 -->
+        <div>
+            <input type="text" id="search-input" placeholder="搜索地点">
+            <button onclick="searchLocation()">搜索</button>
+        </div>
+
+        <!-- 添加地点表单 -->
+        <div style="margin-top: 10px;">
+            <input type="text" id="place-name" placeholder="地点名称">
+            <input type="text" id="place-description" placeholder="地点描述">
+            <input type="file" id="place-image" accept="image/*">
+            <button onclick="addCustomMarker()">添加地点</button>
+        </div>
+
+        <!-- 地点列表 -->
+        <div class="location-list" id="location-list">
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+    <script>
+        let map;
+        let markers = [];
+        let customLocations = [];
+        let tempMarker = null;
+
+        // 初始化地图
+        function initMap() {
+            // 创建地图实例
+            map = L.map('map').setView([39.9042, 116.4074], 13);
+
+            // 添加地图图层
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            // 添加地理编码控件
+            const geocoder = L.Control.geocoder({
+                defaultMarkGeocode: false
+            })
+            .on('markgeocode', function(e) {
+                const bbox = e.geocode.bbox;
+                const poly = L.polygon([
+                    bbox.getSouthEast(),
+                    bbox.getNorthEast(),
+                    bbox.getNorthWest(),
+                    bbox.getSouthWest()
+                ]);
+                map.fitBounds(poly.getBounds());
+            })
+            .addTo(map);
+
+            // 点击地图事件
+            map.on('click', function(e) {
+                if (tempMarker) {
+                    map.removeLayer(tempMarker);
+                }
+                tempMarker = L.marker(e.latlng).addTo(map);
+            });
+        }
+
+        // 搜索地点
+        function searchLocation() {
+            const searchText = document.getElementById('search-input').value;
+            const geocoder = L.Control.Geocoder.nominatim();
+            
+            geocoder.geocode(searchText, function(results) {
+                if (results.length > 0) {
+                    const bbox = results[0].bbox;
+                    map.fitBounds([
+                        [bbox[0], bbox[2]],
+                        [bbox[1], bbox[3]]
+                    ]);
+                    
+                    if (tempMarker) {
+                        map.removeLayer(tempMarker);
+                    }
+                    tempMarker = L.marker(results[0].center).addTo(map);
+                } else {
+                    alert('未找到该地点');
+                }
+            });
+        }
+
+        // 添加自定义标记
+        function addCustomMarker() {
+            const name = document.getElementById('place-name').value;
+            const description = document.getElementById('place-description').value;
+            const imageFile = document.getElementById('place-image').files[0];
+
+            if (!name || !description) {
+                alert('请填写地点名称和描述');
+                return;
+            }
+
+            if (!tempMarker) {
+                alert('请先在地图上选择一个位置');
+                return;
+            }
+
+            if (imageFile) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const location = tempMarker.getLatLng();
+                    const customLocation = {
+                        name: name,
+                        description: description,
+                        image: e.target.result,
+                        position: location
+                    };
+
+                    // 创建标记
+                    const marker = L.marker(location)
+                        .bindPopup(createPopupContent(customLocation))
+                        .addTo(map);
+
+                    markers.push(marker);
+                    customLocations.push(customLocation);
+
+                    // 更新地点列表
+                    updateLocationList();
+
+                    // 清空表单
+                    document.getElementById('place-name').value = '';
+                    document.getElementById('place-description').value = '';
+                    document.getElementById('place-image').value = '';
+                    
+                    // 移除临时标记
+                    if (tempMarker) {
+                        map.removeLayer(tempMarker);
+                        tempMarker = null;
+                    }
+                };
+                reader.readAsDataURL(imageFile);
+            }
+        }
+
+        // 创建弹出窗口内容
+        function createPopupContent(location) {
+            return `
+                <div class="marker-info">
+                    <h3>${location.name}</h3>
+                    <p>${location.description}</p>
+                    <img src="${location.image}">
+                </div>
+            `;
+        }
+
+        // 更新地点列表
+        function updateLocationList() {
+            const listContainer = document.getElementById('location-list');
+            listContainer.innerHTML = '';
+
+            customLocations.forEach((location, index) => {
+                const locationElement = document.createElement('div');
+                locationElement.style.padding = '5px';
+                locationElement.style.borderBottom = '1px solid #ccc';
+                locationElement.innerHTML = `
+                    <strong>${location.name}</strong>
+                    <button onclick="focusLocation(${index})">查看</button>
+                    <button onclick="deleteLocation(${index})">删除</button>
+                `;
+                listContainer.appendChild(locationElement);
+            });
+        }
+
+        // 定位到指定地点
+        function focusLocation(index) {
+            const location = customLocations[index];
+            map.setView(location.position, 15);
+            markers[index].openPopup();
+        }
+
+        // 删除地点
+        function deleteLocation(index) {
+            map.removeLayer(markers[index]);
+            markers.splice(index, 1);
+            customLocations.splice(index, 1);
+            updateLocationList();
+        }
+
+        // 初始化地图
+        initMap();
+    </script>
+</body>
+</html>
